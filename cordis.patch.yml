@@ -1,0 +1,43 @@
+# dsh-pwsh-unconfined — keep pwsh usable when the file policy is only
+# `workspace-write`.
+#
+# BACKGROUND
+# On Windows the shipped composition mounts `@deepseek-ai/dsh-pwsh-sandbox` as
+# `ctx.shell`, so every command is spawned through a Windows ACL restricted-token
+# runner. On affected machines that runner dies during early DLL initialization
+# and the child settles as `0xC0000142` / STATUS_DLL_INIT_FAILED with no output,
+# for every command, regardless of workdir or pwsh path.
+#
+# EVIDENCE (from the machine this plugin was extracted on)
+#   * pwsh.exe runs fine outside the sandbox, so the interpreter is healthy.
+#   * Hundreds of files from a GitHub zip carried a Mark-of-the-Web
+#     (`Zone.Identifier`) stream, breaking PowerShell module loading with
+#     "AuthorizationManager check failed". Clearing them fixed module loading but
+#     NOT the 0xC0000142 failure.
+#   * The bundled `diagnose-windows-sandbox-acl` skill reports
+#     `VERDICT=NOT_THIS_CLASS` on the workspace: WRITE_DAC/WRITE_OWNER present,
+#     no foreign package allow ACEs. The DACL is not the cause.
+#
+# DESIGN NOTE — why subclass instead of mounting `pwsh-local`
+# `@deepseek-ai/dsh-permission-presets` refuses to mount unless
+# `ctx.shell.sandboxMode` is defined. `pwsh-local` does not define it, so
+# swapping to it makes the entire permission selector (Read Only / Workspace
+# Write / Full access) disappear. The bundled subclass keeps extending
+# `SandboxPwshExecutor` — `sandboxMode`, `static inject`, `static Config` and the
+# settlement-time sandbox facts all survive — and only `confine()` returns the
+# unwrapped argv.
+#
+# TRADE-OFF
+# Shell commands run with the harness process's own authority; they are no longer
+# fenced by the ACL restricted token. File tools stay fenced separately by
+# `fs-sandbox`, so `workspace-write` still constrains `ctx.fs` writes. Results
+# honestly report `sandbox.enforcement: none`. Disable this bundle once the
+# upstream runner is fixed.
+- id: pwsh-sandbox
+  disabled: true
+- insert:
+    - id: pwsh-sandbox-unconfined
+      name: dsh-pwsh-unconfined
+      config:
+        # Change this to your own PowerShell 7 executable.
+        pwshPath: 'C:\Program Files\PowerShell\7\pwsh.exe'
